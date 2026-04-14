@@ -1,0 +1,4 @@
+__pycache__/
+*.macro
+.claude/
+*.DS_Store
