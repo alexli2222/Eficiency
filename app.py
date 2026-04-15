@@ -2,7 +2,8 @@ import tkinter as tk
 from tkinter import font as tkfont
 import customtkinter as ctk
 
-from modules.macrology import Macrology
+from modules.macrology import *
+from modules.humantype import HumanType
 
 # ── Palette ────────────────────────────────────────────────────────────────────
 BG_DARK      = "#1e1e2e"   # main background
@@ -17,6 +18,7 @@ DIVIDER      = "#313244"
 
 MODULES = [
     ("Macrology", Macrology),
+    ("HumanType", HumanType),
 ]
 
 
