@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, font as tkfont
+import customtkinter as ctk
 import threading
 import time
 import os
@@ -100,44 +101,27 @@ def _f(size: int, bold: bool = False):
     return (base, size, "bold") if bold else (base, size)
 
 
-def make_btn(parent, text: str, cmd, accent: bool = False) -> tk.Label:
-    """Label-based button styled to match the app theme."""
-    bg  = ACCENT   if accent else BTN_BG
-    fg  = BG_DARK  if accent else TEXT_PRI
-    hbg = ACCENT_HOV if accent else BTN_HOV
+def make_btn(parent, text: str, cmd, accent: bool = False) -> ctk.CTkButton:
+    """CTkButton styled to match the app theme with rounded corners."""
+    fg_color    = ACCENT     if accent else BTN_BG
+    text_color  = BG_DARK    if accent else TEXT_PRI
+    hover_color = ACCENT_HOV if accent else BTN_HOV
 
-    lbl = tk.Label(parent, text=text, bg=bg, fg=fg, font=_f(12),
-                   padx=18, pady=9, cursor="hand", relief="flat")
-    lbl._active = True
-    lbl._bg, lbl._hbg, lbl._fg = bg, hbg, fg
-
-    def _click(e):
-        if lbl._active:
-            cmd()
-
-    def _enter(e):
-        if lbl._active:
-            lbl.configure(bg=hbg)
-
-    def _leave(e):
-        if lbl._active:
-            lbl.configure(bg=bg)
-
-    lbl.bind("<Button-1>", _click)
-    lbl.bind("<Enter>",    _enter)
-    lbl.bind("<Leave>",    _leave)
+    btn = ctk.CTkButton(
+        parent, text=text, command=cmd,
+        fg_color=fg_color, text_color=text_color, hover_color=hover_color,
+        corner_radius=8, font=_f(12), cursor="hand2",
+    )
 
     def enable():
-        lbl._active = True
-        lbl.configure(bg=bg, fg=fg, cursor="hand")
+        btn.configure(state="normal", fg_color=fg_color, text_color=text_color)
 
     def disable():
-        lbl._active = False
-        lbl.configure(bg=ITEM_ACT, fg=TEXT_MUT, cursor="")
+        btn.configure(state="disabled", fg_color=ITEM_ACT, text_color=TEXT_MUT)
 
-    lbl.enable  = enable   # type: ignore[attr-defined]
-    lbl.disable = disable  # type: ignore[attr-defined]
-    return lbl
+    btn.enable  = enable   # type: ignore[attr-defined]
+    btn.disable = disable  # type: ignore[attr-defined]
+    return btn
 
 
 # ── Macro format helpers ──────────────────────────────────────────────────────
@@ -774,7 +758,7 @@ class TextToMacroPage(tk.Frame):
 
 # ── Main module frame ─────────────────────────────────────────────────────────
 
-class Macrology(tk.Frame):
+class Macro(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent, bg=BG_DARK)
         self.grid_rowconfigure(1, weight=1)
@@ -792,7 +776,7 @@ class Macrology(tk.Frame):
         self._tab_btns: list[tk.Label] = []
         for i, label in enumerate(("Run Macros", "Record Macro", "Text to Macro")):
             btn = tk.Label(bar, text=label, bg=SIDEBAR_BG, fg=TEXT_MUT,
-                           font=_f(12), padx=22, pady=13, cursor="hand")
+                           font=_f(12), padx=22, pady=13, cursor="hand2")
             btn.pack(side="left")
             btn.bind("<Button-1>", lambda e, idx=i: self._select_tab(idx))
             btn.bind("<Enter>",    lambda e, b=btn, idx=i: self._tab_hover(b, idx, True))

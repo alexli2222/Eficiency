@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox, font as tkfont
+import customtkinter as ctk
 import time
 import random
 import math
@@ -30,7 +31,12 @@ C_ERR      = "#f38ba8"
 C_WARN     = "#fab387"
 
 # ── Key tables ────────────────────────────────────────────────────────────────
-_SPECIAL = {' ': 'space', '\n': 'enter', '\t': 'tab', '\b': 'backspace'}
+_SPECIAL  = {' ': 'space', '\n': 'enter', '\t': 'tab', '\b': 'backspace'}
+# Keys that don't count toward the WPM character tally
+_SKIP_WPM = frozenset({
+    'shift', 'shift_r', 'ctrl', 'ctrl_r', 'alt', 'alt_r',
+    'backspace', 'caps_lock', 'fn', 'cmd', 'cmd_r',
+})
 
 _SHIFT_BASE = {
     '!': '1', '@': '2', '#': '3', '$': '4', '%': '5',
@@ -91,31 +97,26 @@ def _f(size: int, bold: bool = False):
     return (base, size, "bold") if bold else (base, size)
 
 
-def _make_btn(parent, text: str, cmd, accent: bool = False) -> tk.Label:
-    bg  = ACCENT     if accent else BTN_BG
-    fg  = BG_DARK    if accent else TEXT_PRI
-    hbg = ACCENT_HOV if accent else BTN_HOV
+def _make_btn(parent, text: str, cmd, accent: bool = False) -> ctk.CTkButton:
+    fg_color    = ACCENT     if accent else BTN_BG
+    text_color  = BG_DARK    if accent else TEXT_PRI
+    hover_color = ACCENT_HOV if accent else BTN_HOV
 
-    lbl = tk.Label(parent, text=text, bg=bg, fg=fg, font=_f(12),
-                   padx=18, pady=9, cursor="hand", relief="flat")
-    lbl._active = True
-    lbl._bg, lbl._hbg, lbl._fg = bg, hbg, fg
-
-    lbl.bind("<Button-1>", lambda e: cmd() if lbl._active else None)
-    lbl.bind("<Enter>",    lambda e: lbl.configure(bg=hbg) if lbl._active else None)
-    lbl.bind("<Leave>",    lambda e: lbl.configure(bg=bg)  if lbl._active else None)
+    btn = ctk.CTkButton(
+        parent, text=text, command=cmd,
+        fg_color=fg_color, text_color=text_color, hover_color=hover_color,
+        corner_radius=8, font=_f(12), cursor="hand2",
+    )
 
     def enable():
-        lbl._active = True
-        lbl.configure(bg=bg, fg=fg, cursor="hand")
+        btn.configure(state="normal", fg_color=fg_color, text_color=text_color)
 
     def disable():
-        lbl._active = False
-        lbl.configure(bg=ITEM_ACT, fg=TEXT_MUT, cursor="")
+        btn.configure(state="disabled", fg_color=ITEM_ACT, text_color=TEXT_MUT)
 
-    lbl.enable  = enable   # type: ignore[attr-defined]
-    lbl.disable = disable  # type: ignore[attr-defined]
-    return lbl
+    btn.enable  = enable   # type: ignore[attr-defined]
+    btn.disable = disable  # type: ignore[attr-defined]
+    return btn
 
 
 def _name_to_pynput(name: str):
@@ -257,8 +258,10 @@ class HumanType(tk.Frame):
         self._t0:         float = 0.0
         self._paused_ms:  float = 0.0
         self._pending_id        = None
+        self._stats_id          = None
         self._running:    bool  = False
         self._paused:     bool  = False
+        self._press_times: list = []   # timestamps of WPM-counted keypresses
 
         # Keep StringVars for slider % labels alive (prevents GC)
         self._pct_svars: list = []
@@ -286,31 +289,25 @@ class HumanType(tk.Frame):
                  font=_f(12)).pack(side="left", padx=(0, 8))
 
         self._mode_var = tk.StringVar(value="WPM")
-        opt = tk.OptionMenu(ctrl, self._mode_var, "WPM", "Total Time (s)",
-                            command=self._on_mode_change)
-        opt.configure(
-            bg=INPUT_BG, fg=TEXT_PRI, activebackground=ITEM_ACT,
-            activeforeground=TEXT_PRI, font=_f(12),
-            relief="flat", highlightthickness=0, bd=0,
-        )
-        opt["menu"].configure(
-            bg=INPUT_BG, fg=TEXT_PRI,
-            activebackground=ITEM_ACT, activeforeground=TEXT_PRI,
-            font=_f(12),
-        )
-        opt.pack(side="left", padx=(0, 20))
+        ctk.CTkOptionMenu(
+            ctrl, variable=self._mode_var,
+            values=["WPM", "Total Time (s)"],
+            command=self._on_mode_change,
+            fg_color=INPUT_BG, button_color=ACCENT, button_hover_color=ACCENT_HOV,
+            text_color=TEXT_PRI, dropdown_fg_color=INPUT_BG,
+            dropdown_text_color=TEXT_PRI, dropdown_hover_color=ITEM_ACT,
+            corner_radius=8, font=_f(12),
+        ).pack(side="left", padx=(0, 20))
 
         self._val_lbl = tk.Label(ctrl, text="WPM", bg=BG_DARK, fg=TEXT_MUT,
                                  font=_f(12))
         self._val_lbl.pack(side="left", padx=(0, 8))
 
         self._val_var = tk.StringVar(value="60")
-        tk.Entry(
-            ctrl, textvariable=self._val_var, width=7,
-            bg=INPUT_BG, fg=TEXT_PRI, font=_f(12),
-            insertbackground=ACCENT, relief="flat",
-            highlightthickness=1, highlightcolor=ACCENT,
-            highlightbackground=DIVIDER,
+        ctk.CTkEntry(
+            ctrl, textvariable=self._val_var, width=90,
+            fg_color=INPUT_BG, text_color=TEXT_PRI, font=_f(12),
+            border_color=DIVIDER, border_width=1, corner_radius=6,
         ).pack(side="left")
 
         # ── Behaviour sliders ─────────────────────────────────────────────────
@@ -330,13 +327,12 @@ class HumanType(tk.Frame):
             def _on_slide(v, sv=pct_sv):
                 sv.set(f"{int(float(v))}%")
 
-            tk.Scale(
+            ctk.CTkSlider(
                 sf, variable=var, command=_on_slide,
-                from_=0, to=100, orient=tk.HORIZONTAL,
-                length=200, showvalue=False,
-                bg=BG_DARK, fg=ACCENT,
-                troughcolor=INPUT_BG, activebackground=ACCENT_HOV,
-                highlightthickness=0, bd=0, sliderrelief="raised",
+                from_=0, to=100, width=200,
+                fg_color=INPUT_BG, progress_color=ACCENT,
+                button_color=ACCENT, button_hover_color=ACCENT_HOV,
+                number_of_steps=100,
             ).grid(row=row, column=1, sticky="w", padx=(8, 4))
 
             tk.Label(sf, textvariable=pct_sv, bg=BG_DARK, fg=TEXT_PRI,
@@ -351,12 +347,11 @@ class HumanType(tk.Frame):
 
         # Long-breaks checkbox
         self._long_breaks_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(
+        ctk.CTkCheckBox(
             sf, text="Allow long breaks  (30 s – 3 min)",
             variable=self._long_breaks_var,
-            bg=BG_DARK, fg=TEXT_PRI, selectcolor=ITEM_ACT,
-            activebackground=BG_DARK, activeforeground=ACCENT,
-            font=_f(11), cursor="hand",
+            fg_color=ACCENT, hover_color=ACCENT_HOV,
+            text_color=TEXT_PRI, font=_f(11), cursor="hand2",
         ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
         # ── Text input ────────────────────────────────────────────────────────
@@ -401,6 +396,18 @@ class HumanType(tk.Frame):
         self._st = tk.Label(wrap, textvariable=self._sv, bg=BG_DARK,
                             fg=TEXT_MUT, font=_f(13))
         self._st.grid(row=6, column=0, sticky="w", pady=(8, 0))
+
+        # ── Live stats (WPM + ETA) ─────────────────────────────────────────────
+        stats_row = tk.Frame(wrap, bg=BG_DARK)
+        stats_row.grid(row=7, column=0, sticky="w", pady=(6, 0))
+
+        self._wpm_sv = tk.StringVar(value="")
+        self._eta_sv = tk.StringVar(value="")
+
+        tk.Label(stats_row, textvariable=self._wpm_sv, bg=BG_DARK,
+                 fg=ACCENT, font=_f(12, True)).pack(side="left", padx=(0, 28))
+        tk.Label(stats_row, textvariable=self._eta_sv, bg=BG_DARK,
+                 fg=TEXT_MUT, font=_f(12)).pack(side="left")
 
     # ── Actions ───────────────────────────────────────────────────────────────
 
@@ -453,6 +460,7 @@ class HumanType(tk.Frame):
         self._event_idx = 0
         self._running   = True
         self._paused    = False
+        self._press_times.clear()
 
         self._type_btn.disable()
         self._pause_btn.disable()
@@ -465,6 +473,7 @@ class HumanType(tk.Frame):
         if not self._running or self._paused:
             return
         self._cancel_pending()
+        self._cancel_stats()
         self._paused_ms = (time.time() - self._t0) * 1000
         self._paused    = True
         self._running   = False
@@ -484,8 +493,11 @@ class HumanType(tk.Frame):
         self._running = False
         self._paused  = False
         self._cancel_pending()
+        self._cancel_stats()
         self._release_all()
         self._event_idx = 0
+        self._wpm_sv.set("")
+        self._eta_sv.set("")
         self._status("Terminated.", TEXT_MUT)
         self._type_btn.enable()
         self._pause_btn.disable()
@@ -502,8 +514,10 @@ class HumanType(tk.Frame):
             self._pending_id = self.after(1000, lambda: self._do_countdown(n - 1))
         else:
             self._t0 = time.time()
+            self._press_times.clear()
             self._status("Typing…", C_OK)
             self._pause_btn.enable()
+            self._start_stats()
             self._schedule_next()
 
     def _do_resume_countdown(self, n: int):
@@ -516,6 +530,7 @@ class HumanType(tk.Frame):
             self._t0 = time.time() - self._paused_ms / 1000
             self._status("Typing…", C_OK)
             self._pause_btn.enable()
+            self._start_stats()
             self._schedule_next()
 
     def _schedule_next(self):
@@ -543,6 +558,8 @@ class HumanType(tk.Frame):
                     self._ctrl.release(pkey)
                 self._ctrl.press(pkey)
                 self._held.add(key_name)
+                if key_name not in _SKIP_WPM:
+                    self._press_times.append(time.time())
         except Exception:
             pass
         self._event_idx += 1
@@ -550,6 +567,9 @@ class HumanType(tk.Frame):
 
     def _on_complete(self):
         self._release_all()
+        self._cancel_stats()
+        self._wpm_sv.set("")
+        self._eta_sv.set("")
         self._status("Done.", C_OK)
         self._running = False
         self._type_btn.enable()
@@ -563,6 +583,46 @@ class HumanType(tk.Frame):
         if self._pending_id is not None:
             self.after_cancel(self._pending_id)
             self._pending_id = None
+
+    def _start_stats(self):
+        self._cancel_stats()
+        self._stats_id = self.after(500, self._update_stats)
+
+    def _cancel_stats(self):
+        if self._stats_id is not None:
+            self.after_cancel(self._stats_id)
+            self._stats_id = None
+
+    def _update_stats(self):
+        if not self._running:
+            return
+        now        = time.time()
+        elapsed_ms = (now - self._t0) * 1000
+        elapsed_s  = elapsed_ms / 1000
+
+        # ── Current WPM — 5-second sliding window ─────────────────────────────
+        window   = min(5.0, elapsed_s)
+        cutoff   = now - window
+        self._press_times = [t for t in self._press_times if t > cutoff - 1]
+        recent   = [t for t in self._press_times if t >= cutoff]
+        if window > 0.8 and recent:
+            wpm = (len(recent) / 5) / (window / 60)
+            self._wpm_sv.set(f"{wpm:.0f} WPM")
+        elif elapsed_s > 0.8:
+            self._wpm_sv.set("— WPM")
+
+        # ── ETA — based on last event's pre-scheduled timestamp ───────────────
+        if self._events:
+            remaining_s = max(0.0, (self._events[-1][0] - elapsed_ms) / 1000)
+            if remaining_s > 0:
+                mins = int(remaining_s // 60)
+                secs = int(remaining_s % 60)
+                eta  = f"{mins}m {secs:02d}s left" if mins else f"{secs}s left"
+                self._eta_sv.set(eta)
+            else:
+                self._eta_sv.set("")
+
+        self._stats_id = self.after(500, self._update_stats)
 
     def _release_all(self):
         if self._ctrl:

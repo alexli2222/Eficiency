@@ -1,10 +1,37 @@
+import sys
+import ctypes
+import os
 import tkinter as tk
 from tkinter import font as tkfont
 import customtkinter as ctk
 
-from modules.macrology import Macrology
+try:
+    from PIL import Image, ImageTk as _ImageTk
+    _PIL_OK = True
+except ImportError:
+    _PIL_OK = False
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+
+# ── Windows setup (must run before any window is created) ─────────────────────
+if sys.platform == "win32":
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)   # per-monitor DPI aware
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+    try:
+        # Gives the process its own taskbar button + icon instead of inheriting Python's
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("eficiency.app")
+    except Exception:
+        pass
+
+from modules.macro import Macro
 from modules.humantype import HumanType
 from modules.stats import Stats
+from modules.linalg import LinAlg
 
 # ── Palette ────────────────────────────────────────────────────────────────────
 BG_DARK      = "#1e1e2e"   # main background
@@ -18,8 +45,9 @@ ITEM_ACTIVE  = "#313244"   # nav item selected background
 DIVIDER      = "#313244"
 
 MODULES = [
-    ("Macrology", Macrology),
+    ("Macro", Macro),
     ("HumanType", HumanType),
+    ("LinAlg", LinAlg),
     ("Stats", Stats),
 ]
 
@@ -39,6 +67,7 @@ class App(tk.Tk):
             pass
 
         self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self._set_icon()
         self._build_ui()
         self._select(0)
 
@@ -96,7 +125,7 @@ class App(tk.Tk):
             self._nav_buttons.append(btn)
 
     def _make_nav_item(self, parent, index, label):
-        frame = tk.Frame(parent, bg=SIDEBAR_BG, cursor="hand")
+        frame = tk.Frame(parent, bg=SIDEBAR_BG, cursor="hand2")
         frame.grid_columnconfigure(1, weight=1)
 
         dot = tk.Label(frame, text="●", bg=SIDEBAR_BG, fg=TEXT_MUTED,
@@ -170,6 +199,19 @@ class App(tk.Tk):
         frame._text.configure(bg=bg)
 
     # ── Helpers ────────────────────────────────────────────────────────────────
+
+    def _set_icon(self):
+        ico = os.path.join(_HERE, "icon.ico")
+        png = os.path.join(_HERE, "icon.png")
+        try:
+            if sys.platform == "win32" and os.path.exists(ico):
+                self.iconbitmap(ico)
+            elif _PIL_OK and os.path.exists(png):
+                img = _ImageTk.PhotoImage(Image.open(png))
+                self._icon_img = img          # keep reference — prevents GC
+                self.iconphoto(True, img)
+        except Exception:
+            pass
 
     @staticmethod
     def _has_font(name: str) -> bool:
