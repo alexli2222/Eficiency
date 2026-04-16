@@ -33,10 +33,13 @@ echo "[3/3] Installing packages..."
 pip install --upgrade pip
 pip install customtkinter pynput Pillow
 
-# macOS: install Quartz bindings for macro recording
+# Platform-specific extras
 if [[ "$(uname)" == "Darwin" ]]; then
-    echo "      macOS detected — installing pyobjc-framework-Quartz..."
+    echo "      macOS detected — installing pyobjc-framework-Quartz (macro recording)..."
     pip install pyobjc-framework-Quartz
+elif [[ "$(uname)" == "Linux" ]]; then
+    echo "      Linux detected — installing pygame (audio backend)..."
+    pip install pygame
 fi
 
 echo ""
