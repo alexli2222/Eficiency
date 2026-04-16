@@ -61,12 +61,6 @@ class App(tk.Tk):
         self.minsize(760, 480)
         self.configure(bg=BG_DARK)
 
-        # Remove default title bar border on macOS
-        try:
-            self.tk.call("::tk::unsupported::MacWindowStyle", "style", self._w, "moveableModal", "")
-        except Exception:
-            pass
-
         self.protocol("WM_DELETE_WINDOW", self.destroy)
         self._set_icon()
         self._build_ui()
