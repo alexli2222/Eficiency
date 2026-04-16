@@ -4,6 +4,9 @@ import customtkinter as ctk
 import threading
 import time
 import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import sound
 
 # On macOS, pynput calls TSMGetInputSourceProperty which asserts it runs on
 # the main thread. For playback we use Tk after() to stay on the main thread.
@@ -409,6 +412,7 @@ class RunMacroPage(tk.Frame):
         self._pause_btn.disable()
         self._resume_btn.disable()
         self._term_btn.disable()
+        sound.play_completed()
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

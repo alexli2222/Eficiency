@@ -4,6 +4,10 @@ import customtkinter as ctk
 import time
 import random
 import math
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import sound
 
 try:
     from pynput import keyboard as kb
@@ -576,6 +580,7 @@ class HumanType(tk.Frame):
         self._pause_btn.disable()
         self._resume_btn.disable()
         self._term_btn.disable()
+        sound.play_completed()
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

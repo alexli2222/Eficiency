@@ -32,6 +32,7 @@ from modules.macro import Macro
 from modules.humantype import HumanType
 from modules.stats import Stats
 from modules.linalg import LinAlg
+import sound
 
 # ── Palette ────────────────────────────────────────────────────────────────────
 BG_DARK      = "#1e1e2e"   # main background
@@ -123,6 +124,54 @@ class App(tk.Tk):
             btn = self._make_nav_item(sidebar, i, label)
             btn.grid(row=3 + i, column=0, sticky="ew", padx=12, pady=2)
             self._nav_buttons.append(btn)
+
+        # ── Volume section (pinned to bottom via row > weight row 99) ──
+        tk.Frame(sidebar, bg=DIVIDER, height=1).grid(
+            row=100, column=0, sticky="ew", padx=16)
+
+        tk.Label(
+            sidebar,
+            text="SOUND",
+            bg=SIDEBAR_BG,
+            fg=TEXT_MUTED,
+            font=("SF Pro Text", 9, "bold") if self._has_font("SF Pro Text")
+                 else ("Helvetica Neue", 9, "bold"),
+            anchor="w",
+        ).grid(row=101, column=0, sticky="ew", padx=24, pady=(12, 4))
+
+        vol_row = tk.Frame(sidebar, bg=SIDEBAR_BG)
+        vol_row.grid(row=102, column=0, sticky="ew", padx=16, pady=(0, 22))
+
+        self._vol_sv = tk.StringVar(value="100%")
+
+        def _on_vol(v):
+            sound.set_volume(float(v) / 100.0)
+            self._vol_sv.set(f"{int(float(v))}%")
+
+        vol_slider = ctk.CTkSlider(
+            vol_row,
+            from_=0, to=100,
+            number_of_steps=100,
+            command=_on_vol,
+            fg_color=ITEM_ACTIVE,
+            progress_color=ACCENT,
+            button_color=ACCENT,
+            button_hover_color=ACCENT_HOVER,
+            width=140,
+        )
+        vol_slider.set(100)
+        vol_slider.pack(side="left")
+
+        tk.Label(
+            vol_row,
+            textvariable=self._vol_sv,
+            bg=SIDEBAR_BG,
+            fg=TEXT_PRIMARY,
+            font=("SF Pro Text", 11) if self._has_font("SF Pro Text")
+                 else ("Helvetica Neue", 11),
+            width=4,
+            anchor="w",
+        ).pack(side="left", padx=(8, 0))
 
     def _make_nav_item(self, parent, index, label):
         frame = tk.Frame(parent, bg=SIDEBAR_BG, cursor="hand2")

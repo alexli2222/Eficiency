@@ -20,6 +20,7 @@ BTN_BG     = "#45475a"
 BTN_HOV    = "#585b70"
 C_OK       = "#a6e3a1"
 C_ERR      = "#f38ba8"
+C_WARN     = "#fab387"
 
 # Stat names in strict alphabetical order
 STATS_LIST = [
@@ -408,22 +409,45 @@ class Stats(tk.Frame):
         self._canvas.configure(scrollregion=self._canvas.bbox("all"))
 
     def _on_text_modified(self, _e):
-        self._text.edit_modified(False)  # reset flag so future changes re-fire
+        # Defer all work out of the Tcl/Tk event dispatch entirely.
+        # Calling edit_modified(False) or any widget method from inside the
+        # <<Modified>> handler triggers a Tcl re-entrant display update; on
+        # Python 3.12+ / Tk 9.0 that causes PyEval_RestoreThread(NULL) → abort.
+        # after(0) queues the callback for the next event-loop iteration after
+        # the current Tcl call stack has fully unwound.
+        if getattr(self, '_change_pending', False):
+            return
+        self._change_pending = True
+        self.after(0, self._process_change)
+
+    def _process_change(self):
+        self._change_pending = False
+        # Reset the modified flag now that we are outside the Tcl dispatch.
+        try:
+            self._text.edit_modified(False)
+        except tk.TclError:
+            pass
         self._on_compute()
 
     def _on_compute(self):
         raw = self._text.get("1.0", "end").strip()
         if not raw:
-            self._set_status("No data entered.", C_ERR)
+            self._set_status("Start typing to compute", TEXT_MUT)
+            self._clear_results()
             return
 
         data = []
+        skipped = []
         for tok in raw.split():
             try:
                 data.append(float(tok))
             except ValueError:
-                self._set_status(f"Invalid value: '{tok}'", C_ERR)
-                return
+                skipped.append(tok)
+
+        if not data:
+            self._set_status("No numeric values found.", C_ERR)
+            self._clear_results()
+            return
 
         results = _compute(data)
 
@@ -434,10 +458,21 @@ class Stats(tk.Frame):
                 fg=TEXT_MUT if val.startswith("N/A") else ACCENT,
             )
 
-        self._set_status(
-            f"{len(data)} value(s) \u2014 {len(results)} statistics computed.",
-            C_OK,
-        )
+        if skipped:
+            # Show skipped tokens (special chars, letters, etc.) without crashing
+            preview = ", ".join(repr(t) for t in skipped[:4])
+            if len(skipped) > 4:
+                preview += f" … (+{len(skipped) - 4})"
+            self._set_status(
+                f"{len(data)} value(s) computed. Skipped: {preview}", C_WARN)
+        else:
+            self._set_status(
+                f"{len(data)} value(s) \u2014 {len(results)} statistics computed.",
+                C_OK)
+
+    def _clear_results(self):
+        for lbl in self._value_labels.values():
+            lbl.configure(text="—", fg=TEXT_MUT)
 
     def _set_status(self, msg: str, color: str = TEXT_MUT):
         self._status_sv.set(msg)
