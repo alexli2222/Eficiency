@@ -1,0 +1,9 @@
+# Eficiency — required Python packages
+# Install all at once: pip install -r packages.txt
+
+customtkinter       # modern themed tkinter widgets (buttons, sliders, dropdowns, etc.)
+pynput              # keyboard control and listening (HumanType, Macro modules)
+Pillow              # app icon loading (PIL.Image / PIL.ImageTk)
+
+# macOS only — macro recording via Quartz CGEventTap
+# pyobjc-framework-Quartz
