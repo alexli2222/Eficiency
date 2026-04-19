@@ -31,7 +31,7 @@ source "$VENV_DIR/bin/activate"
 # ── Install packages ──────────────────────────────────────────────────────────
 echo "[3/3] Installing packages..."
 pip install --upgrade pip
-pip install customtkinter pynput Pillow
+pip install customtkinter pynput Pillow tkinterdnd2 pypdf
 
 # Platform-specific extras
 if [[ "$(uname)" == "Darwin" ]]; then

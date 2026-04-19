@@ -6,6 +6,12 @@ from tkinter import font as tkfont
 import customtkinter as ctk
 
 try:
+    from tkinterdnd2 import TkinterDnD as _TkDnD
+    _AppBase = _TkDnD.Tk
+except ImportError:
+    _AppBase = tk.Tk
+
+try:
     from PIL import Image, ImageTk as _ImageTk
     _PIL_OK = True
 except ImportError:
@@ -32,6 +38,7 @@ from modules.macro import Macro
 from modules.humantype import HumanType
 from modules.stats import Stats
 from modules.linalg import LinAlg
+from modules.pdfmerge import PDFMerge
 import sound
 
 # ── Palette ────────────────────────────────────────────────────────────────────
@@ -49,11 +56,12 @@ MODULES = [
     ("Macro", Macro),
     ("HumanType", HumanType),
     ("LinAlg", LinAlg),
+    ("PDFMerge", PDFMerge),
     ("Stats", Stats),
 ]
 
 
-class App(tk.Tk):
+class App(_AppBase):
     def __init__(self):
         super().__init__()
         self.title("Eficiency")

@@ -49,7 +49,7 @@ if errorlevel 1 (
 :: ── Install packages ───────────────────────────────────────────────────────
 echo [3/3] Installing packages...
 pip install --upgrade pip
-pip install customtkinter pynput Pillow
+pip install customtkinter pynput Pillow tkinterdnd2 pypdf
 if errorlevel 1 (
     echo ERROR: pip install failed.
     pause

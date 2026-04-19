@@ -36,7 +36,7 @@ $Activate = Join-Path $VenvDir "Scripts\Activate.ps1"
 # ── Install packages ──────────────────────────────────────────────────────────
 Write-Host "[3/3] Installing packages..."
 pip install --upgrade pip
-pip install customtkinter pynput Pillow
+pip install customtkinter pynput Pillow tkinterdnd2 pypdf
 
 Write-Host ""
 Write-Host "Installation complete."
