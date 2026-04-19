@@ -1,8 +1,10 @@
 import tkinter as tk
 from tkinter import font as tkfont
+import customtkinter as ctk
 import math
 import statistics
 from collections import Counter
+from fractions import Fraction
 
 __all__ = ['Stats']
 
@@ -115,6 +117,57 @@ def _fmt(val) -> str:
     return str(val)
 
 
+def _sqrt_factor(n: int) -> tuple:
+    """Return (a, b) where n = a²·b, b square-free. Assumes n ≤ 10000."""
+    a, i = 1, 2
+    while i * i <= n:
+        while n % (i * i) == 0:
+            a *= i
+            n //= (i * i)
+        i += 1
+    return a, n
+
+
+def _fmt_exact(val) -> str:
+    """Format as integer, fraction, or a√b/c. Falls back to decimal on large values."""
+    if not isinstance(val, (int, float)):
+        return str(val)
+    if isinstance(val, float) and (abs(val) >= 1e10 or (abs(val) < 1e-4 and val != 0.0)):
+        return f"{val:.4e}"
+    x = float(val)
+    if abs(x) < 1e-9:
+        return "0"
+    neg = x < 0
+    a   = abs(x)
+
+    r = round(a)
+    if abs(a - r) < 1e-9:
+        return (f"-{r}" if neg else str(r)) if r != 0 else "0"
+
+    f = Fraction(a).limit_denominator(100)
+    if abs(float(f) - a) < 1e-9:
+        s = str(f.numerator) if f.denominator == 1 else f"{f.numerator}/{f.denominator}"
+        return f"-{s}" if neg else s
+
+    x2 = a * a
+    f2 = Fraction(x2).limit_denominator(100)
+    if abs(float(f2) - x2) < 1e-6:
+        p, q  = f2.numerator, f2.denominator
+        pq    = p * q
+        if pq <= 10000:
+            coef, rad = _sqrt_factor(pq)
+            if 1 < rad <= 1000 and coef > 0:
+                g      = math.gcd(coef, q)
+                c, d   = coef // g, q // g
+                if d <= 100:
+                    c_str  = "" if c == 1 else str(c)
+                    num    = f"{c_str}√{rad}"
+                    result = num if d == 1 else f"{num}/{d}"
+                    return f"-{result}" if neg else result
+
+    return f"{a:.6g}" if not neg else f"-{a:.6g}"
+
+
 def _percentile(sorted_data: list, p: float) -> float:
     n = len(sorted_data)
     idx = p / 100.0 * (n - 1)
@@ -125,30 +178,32 @@ def _percentile(sorted_data: list, p: float) -> float:
     return sorted_data[lo] + (idx - lo) * (sorted_data[hi] - sorted_data[lo])
 
 
-def _compute(data: list) -> dict:
+def _compute(data: list, fmt_fn=None) -> dict:
+    if fmt_fn is None:
+        fmt_fn = _fmt
     n = len(data)
     results = {}
 
     # ── Basic ──
     mean_val = sum(data) / n
     results["Count (N)"]         = str(n)
-    results["Sum"]               = _fmt(float(sum(data)))
-    results["Minimum"]           = _fmt(float(min(data)))
-    results["Maximum"]           = _fmt(float(max(data)))
-    results["Range"]             = _fmt(float(max(data) - min(data)))
-    results["Mean (Arithmetic)"] = _fmt(mean_val)
+    results["Sum"]               = fmt_fn(float(sum(data)))
+    results["Minimum"]           = fmt_fn(float(min(data)))
+    results["Maximum"]           = fmt_fn(float(max(data)))
+    results["Range"]             = fmt_fn(float(max(data) - min(data)))
+    results["Mean (Arithmetic)"] = fmt_fn(mean_val)
 
     # ── Median ──
-    results["Median"] = _fmt(float(statistics.median(data)))
+    results["Median"] = fmt_fn(float(statistics.median(data)))
 
     # ── Mode ──
     c = Counter(data)
     max_cnt = max(c.values())
     modes = sorted(k for k, v in c.items() if v == max_cnt)
     if len(modes) == 1:
-        results["Mode"] = _fmt(modes[0])
+        results["Mode"] = fmt_fn(modes[0])
     else:
-        results["Mode"] = ", ".join(_fmt(m) for m in modes[:6])
+        results["Mode"] = ", ".join(fmt_fn(m) for m in modes[:6])
         if len(modes) > 6:
             results["Mode"] += f" … ({len(modes)} modes)"
         else:
@@ -157,15 +212,15 @@ def _compute(data: list) -> dict:
     # ── Variance & Standard Deviation ──
     var_p = sum((x - mean_val) ** 2 for x in data) / n
     std_p = math.sqrt(var_p)
-    results["Variance (Population)"]           = _fmt(var_p)
-    results["Standard Deviation (Population)"] = _fmt(std_p)
+    results["Variance (Population)"]           = fmt_fn(var_p)
+    results["Standard Deviation (Population)"] = fmt_fn(std_p)
 
     if n >= 2:
         var_s = statistics.variance(data)
         std_s = math.sqrt(var_s)
-        results["Variance (Sample)"]           = _fmt(var_s)
-        results["Standard Deviation (Sample)"] = _fmt(std_s)
-        results["Standard Error of Mean"]      = _fmt(std_s / math.sqrt(n))
+        results["Variance (Sample)"]           = fmt_fn(var_s)
+        results["Standard Deviation (Sample)"] = fmt_fn(std_s)
+        results["Standard Error of Mean"]      = fmt_fn(std_s / math.sqrt(n))
     else:
         results["Variance (Sample)"]           = "N/A  (need n ≥ 2)"
         results["Standard Deviation (Sample)"] = "N/A  (need n ≥ 2)"
@@ -174,7 +229,7 @@ def _compute(data: list) -> dict:
     # ── Coefficient of Variation ──
     if n >= 2 and mean_val != 0:
         cv = math.sqrt(statistics.variance(data)) / abs(mean_val) * 100
-        results["Coefficient of Variation"] = _fmt(cv) + "%"
+        results["Coefficient of Variation"] = fmt_fn(cv) + "%"
     elif mean_val == 0:
         results["Coefficient of Variation"] = "N/A  (mean = 0)"
     else:
@@ -183,37 +238,37 @@ def _compute(data: list) -> dict:
     # ── Geometric Mean (requires all positive) ──
     if all(x > 0 for x in data):
         geo = math.exp(sum(math.log(x) for x in data) / n)
-        results["Geometric Mean"] = _fmt(geo)
+        results["Geometric Mean"] = fmt_fn(geo)
     else:
         results["Geometric Mean"] = "N/A  (need all values > 0)"
 
     # ── Harmonic Mean (requires all positive) ──
     if all(x > 0 for x in data):
         harm = n / sum(1.0 / x for x in data)
-        results["Harmonic Mean"] = _fmt(harm)
+        results["Harmonic Mean"] = fmt_fn(harm)
     else:
         results["Harmonic Mean"] = "N/A  (need all values > 0)"
 
     # ── Percentiles & IQR ──
     sd = sorted(data)
-    results["Percentile (10th)"]      = _fmt(_percentile(sd, 10))
-    results["Percentile (25th / Q1)"] = _fmt(_percentile(sd, 25))
-    results["Percentile (75th / Q3)"] = _fmt(_percentile(sd, 75))
-    results["Percentile (90th)"]      = _fmt(_percentile(sd, 90))
-    results["Interquartile Range (IQR)"] = _fmt(
+    results["Percentile (10th)"]      = fmt_fn(_percentile(sd, 10))
+    results["Percentile (25th / Q1)"] = fmt_fn(_percentile(sd, 25))
+    results["Percentile (75th / Q3)"] = fmt_fn(_percentile(sd, 75))
+    results["Percentile (90th)"]      = fmt_fn(_percentile(sd, 90))
+    results["Interquartile Range (IQR)"] = fmt_fn(
         _percentile(sd, 75) - _percentile(sd, 25))
 
     # ── Skewness (Fisher's moment coefficient) ──
     if n >= 3 and std_p > 0:
         skew = (sum((x - mean_val) ** 3 for x in data) / n) / std_p ** 3
-        results["Skewness"] = _fmt(skew)
+        results["Skewness"] = fmt_fn(skew)
     else:
         results["Skewness"] = "N/A  (need n ≥ 3, std > 0)"
 
     # ── Kurtosis (excess / Fisher) ──
     if n >= 4 and std_p > 0:
         kurt = (sum((x - mean_val) ** 4 for x in data) / n) / std_p ** 4 - 3
-        results["Kurtosis (Excess)"] = _fmt(kurt)
+        results["Kurtosis (Excess)"] = fmt_fn(kurt)
     else:
         results["Kurtosis (Excess)"] = "N/A  (need n ≥ 4, std > 0)"
 
@@ -230,7 +285,8 @@ class Stats(tk.Frame):
         self.grid_columnconfigure(1, weight=1)
 
         self._value_labels: dict[str, tk.Label] = {}
-        self._stat_rows:    dict[str, tuple]    = {}  # name → (row_frame, div_frame)
+        self._stat_rows:    dict[str, tuple]    = {}
+        self._fmt_var = tk.BooleanVar(value=False)
 
         self._build_input_panel()
         self._build_stats_panel()
@@ -294,9 +350,32 @@ class Stats(tk.Frame):
         panel.grid_rowconfigure(4, weight=1)
         panel.grid_columnconfigure(0, weight=1)
 
-        tk.Label(panel, text="Statistics", bg=BG_DARK, fg=TEXT_PRI,
-                 font=_f(16, True), anchor="w").grid(
-            row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        hdr = tk.Frame(panel, bg=BG_DARK)
+        hdr.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        hdr.grid_columnconfigure(0, weight=1)
+
+        tk.Label(hdr, text="Statistics", bg=BG_DARK, fg=TEXT_PRI,
+                 font=_f(16, True), anchor="w").grid(row=0, column=0, sticky="w")
+
+        sw_frame = tk.Frame(hdr, bg=BG_DARK)
+        sw_frame.grid(row=0, column=1, sticky="e")
+
+        self._lbl_dec = tk.Label(sw_frame, text="Decimal", bg=BG_DARK,
+                                  fg=ACCENT, font=_f(11))
+        self._lbl_dec.pack(side="left", padx=(0, 6))
+
+        ctk.CTkSwitch(
+            sw_frame, text="", variable=self._fmt_var,
+            command=self._on_fmt_toggle,
+            onvalue=True, offvalue=False,
+            fg_color=ITEM_ACT, progress_color=ACCENT,
+            button_color=TEXT_PRI, button_hover_color=ACCENT_HOV,
+            width=44, height=22,
+        ).pack(side="left")
+
+        self._lbl_ex = tk.Label(sw_frame, text="Frac & √", bg=BG_DARK,
+                                 fg=TEXT_MUT, font=_f(11))
+        self._lbl_ex.pack(side="left", padx=(6, 0))
 
         # Search bar
         sf = tk.Frame(panel, bg=INPUT_BG,
@@ -385,6 +464,12 @@ class Stats(tk.Frame):
 
     # ── Callbacks ─────────────────────────────────────────────────────────────
 
+    def _on_fmt_toggle(self):
+        exact = self._fmt_var.get()
+        self._lbl_dec.configure(fg=TEXT_MUT if exact else ACCENT)
+        self._lbl_ex.configure(fg=ACCENT if exact else TEXT_MUT)
+        self._on_compute()
+
     def _on_inner_configure(self, _e):
         self._canvas.configure(scrollregion=self._canvas.bbox("all"))
 
@@ -449,7 +534,8 @@ class Stats(tk.Frame):
             self._clear_results()
             return
 
-        results = _compute(data)
+        fmt_fn  = _fmt_exact if self._fmt_var.get() else _fmt
+        results = _compute(data, fmt_fn)
 
         for name, lbl in self._value_labels.items():
             val = results.get(name, "—")

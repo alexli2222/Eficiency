@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import font as tkfont
 import customtkinter as ctk
 import math
+from fractions import Fraction
 
 __all__ = ['LinAlg']
 
@@ -50,8 +51,59 @@ def _fmt_num(x: float, decimals: int = 5) -> str:
     return f"{rounded:.{decimals}f}".rstrip("0").rstrip(".")
 
 
-def _fmt_vec(v: list, decimals: int = 4) -> str:
-    return "(" + ",  ".join(_fmt_num(x, decimals) for x in v) + ")"
+def _sqrt_factor(n: int) -> tuple:
+    """Return (a, b) where n = a²·b, b square-free. Assumes n ≤ 10000."""
+    a, i = 1, 2
+    while i * i <= n:
+        while n % (i * i) == 0:
+            a *= i
+            n //= (i * i)
+        i += 1
+    return a, n
+
+
+def _fmt_exact(x: float) -> str:
+    """Format as integer, fraction, or a√b/c. Falls back to decimal on large values."""
+    if abs(x) < 1e-9:
+        return "0"
+    neg = x < 0
+    a   = abs(x)
+
+    # Integer
+    r = round(a)
+    if abs(a - r) < 1e-9:
+        return (f"-{r}" if neg else str(r)) if r != 0 else "0"
+
+    # Fraction a/b — limit_denominator(100) is O(log 100), always fast
+    f = Fraction(a).limit_denominator(100)
+    if abs(float(f) - a) < 1e-9:
+        s = str(f.numerator) if f.denominator == 1 else f"{f.numerator}/{f.denominator}"
+        return f"-{s}" if neg else s
+
+    # Radical a√n/b — only attempt when x² looks rational with small denominator
+    x2 = a * a
+    f2 = Fraction(x2).limit_denominator(100)   # cap: p,q ≤ 100 → pq ≤ 10000
+    if abs(float(f2) - x2) < 1e-6:
+        p, q  = f2.numerator, f2.denominator
+        pq    = p * q
+        if pq <= 10000:                          # guard: _sqrt_factor loops ≤ 100 times
+            coef, rad = _sqrt_factor(pq)
+            if 1 < rad <= 1000 and coef > 0:    # guard: skip perfect squares, huge radicands
+                g = math.gcd(coef, q)
+                c, d = coef // g, q // g
+                if d <= 100:                     # guard: skip ugly denominators
+                    c_str  = "" if c == 1 else str(c)
+                    num    = f"{c_str}√{rad}"
+                    result = num if d == 1 else f"{num}/{d}"
+                    return f"-{result}" if neg else result
+
+    return _fmt_num(x)
+
+
+def _fmt_vec(v: list, fmt=None) -> str:
+    if fmt is None:
+        fmt = _fmt_num
+    return "⟨" + ",  ".join(fmt(x) for x in v) + "⟩"
 
 
 # ── Vector math ───────────────────────────────────────────────────────────────
@@ -151,6 +203,65 @@ def _rref(M: list) -> tuple:
                 m[i][j] = 0.0
 
     return m, pivots
+
+
+def _ref(M: list) -> list:
+    """Row echelon form (not reduced). Returns REF matrix."""
+    m     = [row[:] for row in M]
+    nrows = len(m)
+    ncols = len(m[0])
+    pr    = 0
+    for col in range(ncols):
+        best, best_val = None, 1e-10
+        for row in range(pr, nrows):
+            if abs(m[row][col]) > best_val:
+                best_val = abs(m[row][col])
+                best     = row
+        if best is None:
+            continue
+        m[pr], m[best] = m[best], m[pr]
+        for row in range(pr + 1, nrows):
+            if abs(m[row][col]) > 1e-12:
+                f = m[row][col] / m[pr][col]
+                m[row] = [m[row][j] - f * m[pr][j] for j in range(ncols)]
+        pr += 1
+        if pr == nrows:
+            break
+    for i in range(nrows):
+        for j in range(ncols):
+            if abs(m[i][j]) < 1e-9:
+                m[i][j] = 0.0
+    return m
+
+
+def _fmt_matrix(M: list, fmt=None) -> list:
+    """Return list of bracket-formatted strings, one per row."""
+    if fmt is None:
+        fmt = _fmt_num
+    if not M or not M[0]:
+        return ["(empty)"]
+    n    = len(M)
+    cols = len(M[0])
+    cells  = [[fmt(M[i][j]) for j in range(cols)] for i in range(n)]
+    widths = [max(len(cells[i][j]) for i in range(n)) for j in range(cols)]
+    lines  = []
+    for i in range(n):
+        content = "  ".join(cells[i][j].rjust(widths[j]) for j in range(cols))
+        if n == 1:
+            lines.append(f"[ {content} ]")
+        elif i == 0:
+            lines.append(f"⌈ {content} ⌉")
+        elif i == n - 1:
+            lines.append(f"⌊ {content} ⌋")
+        else:
+            lines.append(f"| {content} |")
+    return lines
+
+
+def _rows_add_matrix(rows: list, label: str, M: list, fmt=None):
+    """Append a bracket-formatted matrix to a rows list."""
+    for i, line in enumerate(_fmt_matrix(M, fmt=fmt)):
+        rows.append((label if i == 0 else "", line, None))
 
 
 def _det(M: list) -> float:
@@ -261,7 +372,7 @@ def _is_orthogonal(M: list) -> bool:
 
 
 def _eigenvalues_2x2(M: list) -> list:
-    """Exact eigenvalues for 2×2 as list of display strings."""
+    """Exact eigenvalues for 2×2. Returns [(val_or_None, display_str), ...]."""
     a, b  = M[0][0], M[0][1]
     c, d  = M[1][0], M[1][1]
     tr_   = a + d
@@ -271,69 +382,138 @@ def _eigenvalues_2x2(M: list) -> list:
         sq = math.sqrt(disc)
         l1, l2 = (tr_ + sq) / 2, (tr_ - sq) / 2
         if abs(l1 - l2) < 1e-9:
-            return [f"{_fmt_num(l1)}  (repeated)"]
-        return [_fmt_num(l1), _fmt_num(l2)]
+            return [(l1, f"{_fmt_num(l1)}  (repeated)")]
+        return [(l1, _fmt_num(l1)), (l2, _fmt_num(l2))]
     sq = math.sqrt(-disc)
-    return [f"{_fmt_num(tr_ / 2)} ± {_fmt_num(sq / 2)}i  (complex conjugate pair)"]
+    return [(None, f"{_fmt_num(tr_ / 2)} ± {_fmt_num(sq / 2)}i  (complex pair)")]
+
+
+def _solve_depressed_cubic(p: float, q: float) -> list:
+    """Real roots of t³ + pt + q = 0, sorted descending."""
+    disc = -(4.0 * p**3 + 27.0 * q**2)
+    eps  = 1e-9 * max(1.0, abs(p) ** 1.5, abs(q))
+
+    if abs(disc) <= eps:
+        if abs(p) < 1e-12:
+            return [0.0]
+        t1 = 3.0 * q / p
+        t2 = -3.0 * q / (2.0 * p)
+        vals = sorted({round(t1, 9), round(t2, 9)}, reverse=True)
+        return vals
+
+    if disc > 0:
+        m     = 2.0 * math.sqrt(-p / 3.0)
+        inner = max(-1.0, min(1.0, 3.0 * q / (p * m)))
+        theta = math.acos(inner)
+        return sorted([m * math.cos((theta - 2.0 * math.pi * k) / 3.0)
+                       for k in range(3)], reverse=True)
+
+    D  = q * q / 4.0 + p**3 / 27.0
+    sq = math.sqrt(D)
+    u  = -q / 2.0 + sq
+    v  = -q / 2.0 - sq
+    return [math.copysign(abs(u) ** (1.0 / 3.0), u) +
+            math.copysign(abs(v) ** (1.0 / 3.0), v)]
+
+
+def _eigenvalues_3x3(M: list) -> tuple:
+    """Real eigenvalues of 3×3 M. Returns (eigenvalue_list, has_complex_pair)."""
+    tr        = sum(M[i][i] for i in range(3))
+    m11       = M[1][1] * M[2][2] - M[1][2] * M[2][1]
+    m22       = M[0][0] * M[2][2] - M[0][2] * M[2][0]
+    m33       = M[0][0] * M[1][1] - M[0][1] * M[1][0]
+    minor_sum = m11 + m22 + m33
+    det_val   = _det(M)
+
+    s    = tr / 3.0
+    p    = minor_sum - tr * tr / 3.0
+    q    = -2.0 * tr**3 / 27.0 + tr * minor_sum / 3.0 - det_val
+    disc = -(4.0 * p**3 + 27.0 * q**2)
+
+    ts           = _solve_depressed_cubic(p, q)
+    has_complex  = disc < -1e-6
+    return ([t + s for t in ts], has_complex)
+
+
+def _eigenvector(M: list, lam: float) -> list:
+    """Basis of eigenspace for eigenvalue lam via null space of (M − λI)."""
+    n = len(M)
+    A = [[M[i][j] - (lam if i == j else 0.0) for j in range(n)] for i in range(n)]
+    return _null_space(A)
 
 
 # ── Subspace Cartesian helpers ────────────────────────────────────────────────
 
-def _sym_line_3d(v: list) -> str:
-    """Symmetric equations for line through origin with direction v ∈ ℝ³."""
-    vs    = ['x', 'y', 'z']
-    nz    = [i for i in range(3) if abs(v[i]) > 1e-10]
-    zero  = [i for i in range(3) if abs(v[i]) <= 1e-10]
-    sym   = " = ".join(f"{vs[i]}/{_fmt_num(v[i])}" for i in nz)
-    extra = ",  ".join(f"{vs[i]} = 0" for i in zero)
-    return (sym + ",  " + extra) if extra else sym
+def _rhs_terms(terms: list, fmt) -> str:
+    """Build 'c₁v₁ + c₂v₂ - …' from list of (coef, varname). Omits coef=±1."""
+    parts = []
+    for j, (coef, vname) in enumerate(terms):
+        a     = abs(coef)
+        c_str = "" if abs(a - 1.0) < 1e-9 else fmt(a)
+        if j == 0:
+            parts.append(f"{'-' if coef < 0 else ''}{c_str}{vname}")
+        else:
+            parts.append(f"{' - ' if coef < 0 else ' + '}{c_str}{vname}")
+    return "".join(parts)
 
 
-def _subspace_cartesian(basis: list, ambient: int):
-    """Return (vector_form_str, cartesian_str | None) for a subspace."""
+def _subspace_cartesian(basis: list, ambient: int, fmt=None):
+    """Return (vector_form_str, [cartesian_eq, ...]) for a subspace."""
+    if fmt is None:
+        fmt = _fmt_num
     dim = len(basis)
+    sz  = len(basis[0]) if basis else ambient
+    vs  = ['x', 'y', 'z'][:sz] if sz <= 3 else [f"x{i+1}" for i in range(sz)]
+
     if dim == 0:
-        return "{ 0 }  (trivial)", None
+        return "{ 0 }  (trivial)", []
 
     if dim == 1:
-        v_str = "t · " + _fmt_vec(basis[0])
-        cart  = None
-        if ambient == 2:
-            a, b  = basis[0][0], basis[0][1]
-            parts = []
-            if abs(b) > 1e-10:
-                parts.append(f"{_fmt_num(b)}x")
-            if abs(a) > 1e-10:
-                sign = " − " if a > 0 else " + "
-                parts.append(f"{sign}{_fmt_num(abs(a))}y")
-            cart = (" ".join(parts) + " = 0") if parts else None
-        elif ambient == 3:
-            cart = _sym_line_3d(basis[0])
-        return v_str, cart
+        v_str = "t · " + _fmt_vec(basis[0], fmt=fmt)
+        v     = basis[0]
+        nz    = [i for i in range(sz) if abs(v[i]) > 1e-10]
+        zz    = [i for i in range(sz) if abs(v[i]) <= 1e-10]
+        if not nz:
+            return v_str, []
+        base  = nz[0]
+        eqs   = [f"{vs[i]} = 0" for i in zz]
+        for i in nz[1:]:
+            ratio = v[i] / v[base]
+            a     = abs(ratio)
+            c_str = "" if abs(a - 1.0) < 1e-9 else fmt(a)
+            eqs.append(f"{vs[i]} = {'-' if ratio < 0 else ''}{c_str}{vs[base]}")
+        return v_str, eqs
 
     if dim == 2 and ambient == 3:
-        v_str = "s · " + _fmt_vec(basis[0]) + "  +  t · " + _fmt_vec(basis[1])
+        v_str = "s · " + _fmt_vec(basis[0], fmt=fmt) + "  +  t · " + _fmt_vec(basis[1], fmt=fmt)
         n     = _cross3(basis[0], basis[1])
-        mag   = _magnitude(n)
-        if mag < 1e-10:
-            return v_str, None
-        vs    = ['x', 'y', 'z']
-        terms = []
-        for i in range(3):
-            if abs(n[i]) > 1e-10:
-                coef = _fmt_num(n[i])
-                if not terms:
-                    terms.append(f"{coef}{vs[i]}")
-                elif n[i] > 0:
-                    terms.append(f"+ {coef}{vs[i]}")
-                else:
-                    terms.append(f"− {_fmt_num(-n[i])}{vs[i]}")
-        cart = " ".join(terms) + " = 0"
-        return v_str, cart
+        if _magnitude(n) < 1e-10:
+            return v_str, []
+        pivot = max(range(3), key=lambda i: abs(n[i]))
+        others = [(i, -n[i] / n[pivot]) for i in range(3) if i != pivot]
+        terms  = [(c, vs[i]) for i, c in others if abs(c) > 1e-10]
+        rhs    = _rhs_terms(terms, fmt) if terms else "0"
+        return v_str, [f"{vs[pivot]} = {rhs}"]
 
-    # Higher dimensions — just parametric
-    parts = [f"{chr(ord('r') + i)} · {_fmt_vec(basis[i])}" for i in range(dim)]
-    return "  +  ".join(parts), None
+    # Higher dimensions — parametric only
+    parts = [f"{chr(ord('r') + i)} · {_fmt_vec(basis[i], fmt=fmt)}" for i in range(dim)]
+    return "  +  ".join(parts), []
+
+
+def _null_space_eqs(rref_M: list, pivs: list, ncols: int, fmt=None) -> list:
+    """Cartesian equations of the null space derived from RREF (pivot = f(free))."""
+    if fmt is None:
+        fmt = _fmt_num
+    free = [j for j in range(ncols) if j not in set(pivs)]
+    if not free:
+        return []
+    vs   = ['x', 'y', 'z'][:ncols] if ncols <= 3 else [f"x{i+1}" for i in range(ncols)]
+    eqs  = []
+    for i, pc in enumerate(pivs):
+        terms = [(- rref_M[i][fc], vs[fc]) for fc in free if abs(rref_M[i][fc]) > 1e-10]
+        rhs   = _rhs_terms(terms, fmt) if terms else "0"
+        eqs.append(f"{vs[pc]} = {rhs}")
+    return eqs
 
 
 # ── Shared results renderer ───────────────────────────────────────────────────
@@ -433,10 +613,11 @@ def _hint_block(parent: tk.Frame, text: str) -> tk.Label:
 # ── Vector page ───────────────────────────────────────────────────────────────
 
 class VectorPage(tk.Frame):
-    def __init__(self, parent):
+    def __init__(self, parent, fmt_var):
         super().__init__(parent, bg=BG_DARK)
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
+        self._fmt_var = fmt_var
 
         self._u_var = tk.StringVar()
         self._v_var = tk.StringVar()
@@ -497,6 +678,7 @@ class VectorPage(tk.Frame):
         return entry
 
     def _on_change(self, *_):
+        fmt   = _fmt_exact if self._fmt_var.get() else _fmt_num
         u_raw = self._u_var.get().strip()
         v_raw = self._v_var.get().strip()
         u     = _parse_vec(u_raw) if u_raw else None
@@ -515,15 +697,15 @@ class VectorPage(tk.Frame):
 
         if u:
             mag_u = _magnitude(u)
-            rows.append((f"│u│   (u ∈ ℝ{len(u)})", _fmt_num(mag_u), None))
+            rows.append((f"│u│   (u ∈ ℝ{len(u)})", fmt(mag_u), None))
             if mag_u > 1e-12:
-                rows.append(("û  (unit u)", _fmt_vec([x / mag_u for x in u]), None))
+                rows.append(("û  (unit u)", _fmt_vec([x / mag_u for x in u], fmt=fmt), None))
 
         if v:
             mag_v = _magnitude(v)
-            rows.append((f"│v│   (v ∈ ℝ{len(v)})", _fmt_num(mag_v), None))
+            rows.append((f"│v│   (v ∈ ℝ{len(v)})", fmt(mag_v), None))
             if mag_v > 1e-12:
-                rows.append(("v̂  (unit v)", _fmt_vec([x / mag_v for x in v]), None))
+                rows.append(("v̂  (unit v)", _fmt_vec([x / mag_v for x in v], fmt=fmt), None))
 
         # ── Dimension mismatch ────────────────────────────────────────────────
         if u and v and len(u) != len(v):
@@ -543,31 +725,31 @@ class VectorPage(tk.Frame):
             dot   = sum(a * b for a, b in zip(u, v))
 
             rows.append(("COMBINED",))
-            rows.append(("u · v  (dot)", _fmt_num(dot), None))
+            rows.append(("u · v  (dot)", fmt(dot), None))
 
             if dim == 3:
                 cross = _cross3(u, v)
-                rows.append(("u × v  (cross)", _fmt_vec(cross), None))
-                rows.append(("│u × v│",        _fmt_num(_magnitude(cross)), None))
+                rows.append(("u × v  (cross)", _fmt_vec(cross, fmt=fmt), None))
+                rows.append(("│u × v│",        fmt(_magnitude(cross)), None))
 
             if mag_u > 1e-12 and mag_v > 1e-12:
                 cos_t = max(-1.0, min(1.0, dot / (mag_u * mag_v)))
                 theta = math.acos(cos_t)
                 rows.append(("θ  (angle)",
-                              f"{_fmt_num(math.degrees(theta))}°   /   "
-                              f"{_fmt_num(theta)} rad", None))
+                              f"{fmt(math.degrees(theta))}°   /   "
+                              f"{fmt(theta)} rad", None))
 
             if mag_v > 1e-12:
                 s = dot / (mag_v ** 2)
-                rows.append(("proj_v u", _fmt_vec([s * x for x in v]), None))
+                rows.append(("proj_v u", _fmt_vec([s * x for x in v], fmt=fmt), None))
 
             if mag_u > 1e-12:
                 s = dot / (mag_u ** 2)
-                rows.append(("proj_u v", _fmt_vec([s * x for x in u]), None))
+                rows.append(("proj_u v", _fmt_vec([s * x for x in u], fmt=fmt), None))
 
-            rows.append(("u + v", _fmt_vec([a + b for a, b in zip(u, v)]), None))
-            rows.append(("u − v", _fmt_vec([a - b for a, b in zip(u, v)]), None))
-            rows.append(("v − u", _fmt_vec([b - a for a, b in zip(u, v)]), None))
+            rows.append(("u + v", _fmt_vec([a + b for a, b in zip(u, v)], fmt=fmt), None))
+            rows.append(("u − v", _fmt_vec([a - b for a, b in zip(u, v)], fmt=fmt), None))
+            rows.append(("v − u", _fmt_vec([b - a for a, b in zip(u, v)], fmt=fmt), None))
 
             if mag_u > 1e-12 and mag_v > 1e-12:
                 rows.append(("PROPERTIES",))
@@ -580,8 +762,8 @@ class VectorPage(tk.Frame):
 
                 if dim == 3:
                     cm = _magnitude(_cross3(u, v))
-                    rows.append(("Area of parallelogram", _fmt_num(cm),      None))
-                    rows.append(("Area of triangle",      _fmt_num(cm / 2),  None))
+                    rows.append(("Area of parallelogram", fmt(cm),     None))
+                    rows.append(("Area of triangle",      fmt(cm / 2), None))
 
         _render_rows(self._rf, rows)
 
@@ -589,10 +771,11 @@ class VectorPage(tk.Frame):
 # ── Matrix page ───────────────────────────────────────────────────────────────
 
 class MatrixPage(tk.Frame):
-    def __init__(self, parent):
+    def __init__(self, parent, fmt_var):
         super().__init__(parent, bg=BG_DARK)
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
+        self._fmt_var = fmt_var
         self._mat_var = tk.StringVar()
         self._mat_var.trace_add("write", self._on_change)
         self._build()
@@ -671,6 +854,7 @@ class MatrixPage(tk.Frame):
             self._two_frame.grid(row=1, column=0, sticky="nsew")
 
     def _on_change(self, *_):
+        fmt = _fmt_exact if self._fmt_var.get() else _fmt_num
         raw = self._mat_var.get().strip()
         M   = _parse_matrix(raw) if raw else None
 
@@ -686,8 +870,8 @@ class MatrixPage(tk.Frame):
         square = nrows == ncols
         n      = nrows
 
-        _, pivs = _rref(M)
-        rank    = len(pivs)
+        rref_M, pivs = _rref(M)
+        rank         = len(pivs)
         nullity      = ncols - rank
 
         null_basis   = _null_space(M)
@@ -698,64 +882,78 @@ class MatrixPage(tk.Frame):
         # ── Size & rank ───────────────────────────────────────────────────────
         rows.append(("GENERAL",))
         rows.append(("Size",    f"{nrows} × {ncols}", None))
-        rows.append(("Rank",    _fmt_num(rank),        None))
-        rows.append(("Nullity", _fmt_num(nullity),     None))
+        rows.append(("Rank",    fmt(rank),             None))
+        rows.append(("Nullity", fmt(nullity),          None))
+
+        # ── REF / RREF ────────────────────────────────────────────────────────
+        rows.append(("ROW ECHELON FORMS",))
+        _rows_add_matrix(rows, "REF",  _ref(M),  fmt=fmt)
+        _rows_add_matrix(rows, "RREF", rref_M,   fmt=fmt)
 
         # ── Square-only ───────────────────────────────────────────────────────
         if square:
-            det   = _det(M)
-            tr    = _trace(M)
+            det    = _det(M)
+            tr     = _trace(M)
             invert = abs(det) > 1e-9
 
             rows.append(("SQUARE MATRIX",))
-            rows.append(("Trace",       _fmt_num(tr),                   None))
-            rows.append(("Det",         _fmt_num(det),                  None))
+            rows.append(("Trace",       fmt(tr),                        None))
+            rows.append(("Det",         fmt(det),                       None))
             rows.append(("Invertible?", "Yes" if invert else "No",      invert))
 
             if invert:
                 inv = _inverse(M)
                 if inv:
-                    rows.append(("Inverse  (row 1)", _fmt_vec(inv[0]), None))
-                    for i in range(1, n):
-                        rows.append(("", _fmt_vec(inv[i]), None))
+                    _rows_add_matrix(rows, "A⁻¹", inv, fmt=fmt)
 
             rows.append(("Symmetric?",  "Yes" if _is_symmetric(M) else "No",
                           _is_symmetric(M)))
             rows.append(("Orthogonal?", "Yes" if _is_orthogonal(M) else "No",
                           _is_orthogonal(M)))
 
-            if n == 2:
-                rows.append(("EIGENVALUES  (2×2)",))
-                for ev in _eigenvalues_2x2(M):
-                    rows.append(("λ", ev, None))
+            if n in (2, 3):
+                rows.append(("EIGENVALUES",))
+                if n == 2:
+                    pairs = _eigenvalues_2x2(M)
+                else:
+                    evals, has_complex = _eigenvalues_3x3(M)
+                    pairs = [(lam, fmt(lam)) for lam in evals]
+                for lam, label in pairs:
+                    rows.append(("λ", label, None))
+                    if lam is not None:
+                        for ev in _eigenvector(M, lam):
+                            rows.append(("  eigenvec", _fmt_vec(ev, fmt=fmt), None))
+                if n == 3 and has_complex:
+                    rows.append(("Complex eigenvalue pair not shown", None, TEXT_MUT))
 
         # ── Null space ────────────────────────────────────────────────────────
         rows.append(("NULL SPACE  ker(A)",))
         if not null_basis:
             rows.append(("Basis", "{ 0 }  (trivial)", None))
         else:
-            vec_str, cart = _subspace_cartesian(null_basis, nrows)
-            rows.append(("dim  ker(A)", _fmt_num(len(null_basis)), None))
+            vec_str, _ = _subspace_cartesian(null_basis, ncols, fmt=fmt)
+            cart_eqs   = _null_space_eqs(rref_M, pivs, ncols, fmt=fmt)
+            rows.append(("dim  ker(A)", fmt(len(null_basis)), None))
             rows.append(("Basis vectors", "", None))
             for v in null_basis:
-                rows.append(("", _fmt_vec(v), None))
+                rows.append(("", _fmt_vec(v, fmt=fmt), None))
             rows.append(("Vector form", vec_str, None))
-            if cart:
-                rows.append(("Cartesian", cart, None))
+            for i, eq in enumerate(cart_eqs):
+                rows.append(("Cartesian" if i == 0 else "", eq, None))
 
         # ── Column space ──────────────────────────────────────────────────────
         rows.append(("COLUMN SPACE  im(A)",))
         if not col_basis:
             rows.append(("Basis", "{ 0 }", None))
         else:
-            vec_str, cart = _subspace_cartesian(col_basis, nrows)
-            rows.append(("dim  im(A)",    _fmt_num(len(col_basis)), None))
+            vec_str, cart_eqs = _subspace_cartesian(col_basis, nrows, fmt=fmt)
+            rows.append(("dim  im(A)",    fmt(len(col_basis)), None))
             rows.append(("Basis vectors", "", None))
             for v in col_basis:
-                rows.append(("", _fmt_vec(v), None))
+                rows.append(("", _fmt_vec(v, fmt=fmt), None))
             rows.append(("Vector form", vec_str, None))
-            if cart:
-                rows.append(("Cartesian", cart, None))
+            for i, eq in enumerate(cart_eqs):
+                rows.append(("Cartesian" if i == 0 else "", eq, None))
 
         _render_rows(self._rf, rows)
 
@@ -768,6 +966,7 @@ class LinAlg(tk.Frame):
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
         self._active_tab = 0
+        self._fmt_var = tk.BooleanVar(value=False)
         self._build_tab_bar()
         self._build_pages()
         self._select_tab(0)
@@ -787,6 +986,34 @@ class LinAlg(tk.Frame):
             btn.bind("<Leave>",    lambda e, b=btn, idx=i: self._tab_hover(b, idx, False))
             self._tab_btns.append(btn)
 
+        sw_frame = tk.Frame(bar, bg=SIDEBAR_BG)
+        sw_frame.pack(side="right", padx=16, pady=10)
+
+        self._lbl_dec = tk.Label(sw_frame, text="Decimal", bg=SIDEBAR_BG,
+                                  fg=ACCENT, font=_f(11))
+        self._lbl_dec.pack(side="left", padx=(0, 6))
+
+        ctk.CTkSwitch(
+            sw_frame, text="", variable=self._fmt_var,
+            command=self._on_fmt_change,
+            onvalue=True, offvalue=False,
+            fg_color=ITEM_ACT, progress_color=ACCENT,
+            button_color=TEXT_PRI, button_hover_color=ACCENT_HOV,
+            width=44, height=22,
+        ).pack(side="left")
+
+        self._lbl_ex = tk.Label(sw_frame, text="Frac & √", bg=SIDEBAR_BG,
+                                 fg=TEXT_MUT, font=_f(11))
+        self._lbl_ex.pack(side="left", padx=(6, 0))
+
+    def _on_fmt_change(self, _=None):
+        exact = self._fmt_var.get()
+        self._lbl_dec.configure(fg=TEXT_MUT if exact else ACCENT)
+        self._lbl_ex.configure(fg=ACCENT if exact else TEXT_MUT)
+        for page in self._pages:
+            if hasattr(page, "_on_change"):
+                page._on_change()
+
     def _tab_hover(self, btn, idx: int, entering: bool):
         if self._active_tab == idx:
             return
@@ -803,4 +1030,4 @@ class LinAlg(tk.Frame):
                 page.grid_remove()
 
     def _build_pages(self):
-        self._pages = [VectorPage(self), MatrixPage(self)]
+        self._pages = [VectorPage(self, self._fmt_var), MatrixPage(self, self._fmt_var)]

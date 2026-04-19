@@ -84,7 +84,7 @@ class App(_AppBase):
         self._build_content_area()
 
     def _build_sidebar(self):
-        sidebar = tk.Frame(self, bg=SIDEBAR_BG, width=220)
+        sidebar = tk.Frame(self, bg=SIDEBAR_BG, width=320)
         sidebar.grid(row=0, column=0, sticky="ns")
         sidebar.grid_propagate(False)
         sidebar.grid_rowconfigure(99, weight=1)  # push items to top
